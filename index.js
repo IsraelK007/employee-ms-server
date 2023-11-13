@@ -1,19 +1,20 @@
 const express = require("express");
-const app = express();
-const bcrypt = require("bcrypt");
-const bodyParser = require("body-parser");
 const cors = require("cors");
-const session = require("express-session");
-const passport = require("passport");
 const flash = require('express-flash');
-const jwt = require('jsonwebtoken');
+const session = require("express-session");
 
+const app = express();
+const jwt = require('jsonwebtoken');
+const bcrypt = require("bcrypt");
+const passport = require("passport");
+const bodyParser = require("body-parser");
+
+const employeeRoutes = require('./routes/Employee');
 const initializePassport = require("./passportConfig");
 const { pool } = require("./dbConfig")
 
-const employeeRoutes = require('./routes/Employee');
-
 initializePassport(passport);
+
 const PORT = process.env.PORT || 3003;
 
 app.use(express.urlencoded({ extended: false }));
@@ -21,6 +22,8 @@ app.use(express.urlencoded({ extended: false }));
 app.use(bodyParser.json()); // Parse JSON data in the request body
 app.use(cors()); // Cross-Origin Resource Sharing (CORS) Allow requests coming from different platforms
 app.use(express.json()); // Parse JSON data in the request body 
+
+app.use(flash());
 
 app.use(session({
     secret: 'keyboard cat',
@@ -31,7 +34,6 @@ app.use(session({
     },
 }))
 
-app.use(flash());
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -43,7 +45,6 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 app.use('/api/employees', employeeRoutes);
-
 
 // Signing up endpoint
 app.post("/users/register", async (req, res) => {
@@ -87,12 +88,13 @@ app.post('/users/login', passport.authenticate("local"), async (req, res) => {
     const { email, password } = req.body;
 
     // Query the database to get the user's hashed password
-    const query = 'SELECT id, password FROM users WHERE email = $1';
+    const query = 'SELECT id, username, email, password FROM users WHERE email = $1';
     const values = [email];
 
     try {
         const result = await pool.query(query, values);
         const user = result.rows[0];
+
         if (!user) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
@@ -104,13 +106,15 @@ app.post('/users/login', passport.authenticate("local"), async (req, res) => {
             }
             if (isMatch) {
                 // Passwords match, generate a JWT token
-                const token = jwt.sign({ userId: user.id }, "secretKey", { expiresIn: '1h' });
-                res.status(200).json({ token, redirectUrl: "/admin" });
+                const token = jwt.sign(
+                    { userId: user.id },
+                    process.env.SECRTETE_KEY,
+                    { expiresIn: '1h' });
+                res.status(200).json({ user, token, redirectUrl: "/admin" });
             } else {
                 return res.status(401).json({ message: 'Invalid email or password' });
             }
         });
-
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal server error' });
@@ -124,22 +128,11 @@ app.get("/users/logout", (req, res) => {
     res.status(200).json({ redirectUrl: "/" });
 })
 
-
 // Implement verifyPassword function for checking password validity
 app.use((err, req, res, next) => {
     // Authentication failed
     res.status(401).json({ message: "Authentication failed" });
 });
-
-
-function checkAuthenticated(req, res, next) {
-    if (req.isAuthenticated()) {
-        // User is authenticated, allow the request to proceed.
-        return next();
-    }
-    // User is not authenticated, return a 401 Unauthorized status.
-    res.status(401).json({ message: "Authentication required" });
-}
 
 app.listen(PORT, () => {
     console.log(`Employee management server running on PORT : ${PORT}`)
